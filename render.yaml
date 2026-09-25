@@ -1,0 +1,35 @@
+services:
+  # Unified Web Service (Backend + Compiled React Frontend)
+  - type: web
+    name: ai-resume-platform
+    env: python
+    buildCommand: "cd frontend && npm install && npm run build && cd ../backend && pip install -r requirements.txt"
+    startCommand: "cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: ai-resume-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: ai-resume-db
+          property: port
+      - key: DB_USER
+        fromDatabase:
+          name: ai-resume-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: ai-resume-db
+          property: password
+      - key: DB_NAME
+        fromDatabase:
+          name: ai-resume-db
+          property: database
+      - key: JWT_SECRET
+        generateValue: true
+
+databases:
+  - name: ai-resume-db
+    databaseName: ai_resume_db
+    user: ai_resume_user

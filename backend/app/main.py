@@ -1,10 +1,13 @@
 """FastAPI Application Entry Point for AI Resume Intelligence & Job Matching Platform.
+Supports standalone API mode and unified single-port production SPA serving.
 """
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from app.core.config import settings
 from app.database.session import Base, engine, SessionLocal
@@ -80,17 +83,35 @@ app.include_router(analysis_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
 
 
-@app.get("/", tags=["System"])
-def root():
-    return {
-        "platform": settings.PROJECT_NAME,
-        "version": settings.VERSION,
-        "status": "online",
-        "docs_url": "/docs",
-        "note": "AI Resume Intelligence & Job Matching Platform REST API"
-    }
-
-
 @app.get("/health", tags=["System"])
 def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "platform": settings.PROJECT_NAME, "version": settings.VERSION}
+
+
+# Check if compiled frontend exists for unified deployment
+frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if frontend_dist.exists() and (frontend_dist / "index.html").exists():
+    assets_dir = frontend_dist / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}", tags=["Frontend SPA"])
+    async def serve_spa(full_path: str):
+        # Don't intercept API or docs routes
+        if full_path.startswith("api/") or full_path in ("docs", "redoc", "openapi.json", "health"):
+            return JSONResponse({"detail": "Not Found"}, status_code=status.HTTP_404_NOT_FOUND)
+        
+        target_file = frontend_dist / full_path
+        if target_file.exists() and target_file.is_file():
+            return FileResponse(target_file)
+        return FileResponse(frontend_dist / "index.html")
+else:
+    @app.get("/", tags=["System"])
+    def root():
+        return {
+            "platform": settings.PROJECT_NAME,
+            "version": settings.VERSION,
+            "status": "online",
+            "docs_url": "/docs",
+            "note": "AI Resume Intelligence & Job Matching Platform REST API"
+        }
