@@ -2,6 +2,9 @@
 
 A full-stack, production-style recruitment technology platform that automates PDF resume extraction, technical skill detection, TF-IDF vectorization, cosine similarity job matching, and skill gap analysis with curated learning recommendations.
 
+**🌐 Live Demo Website**: [https://akash1172007akash-droid.github.io/ai-resume-platform/](https://akash1172007akash-droid.github.io/ai-resume-platform/)  
+**📂 GitHub Repository**: [https://github.com/akash1172007akash-droid/ai-resume-platform](https://github.com/akash1172007akash-droid/ai-resume-platform)
+
 ---
 
 ## Overview
