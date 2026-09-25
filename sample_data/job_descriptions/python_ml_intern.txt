@@ -1,0 +1,5 @@
+Title: Python Machine Learning Intern
+Company: Apex AI Technologies
+Level: Internship
+
+We are seeking a motivated Python Machine Learning Intern to join our data intelligence team. The candidate will work on developing ML models, feature engineering pipelines, and REST APIs. Required skills include Python, SQL, Machine Learning, Pandas, and Scikit-learn. Preferred skills: FastAPI, React, and Git.

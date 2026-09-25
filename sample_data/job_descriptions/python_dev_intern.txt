@@ -1,0 +1,5 @@
+Title: Python Developer Intern
+Company: CloudScale Software
+Level: Internship
+
+Looking for a Python Developer Intern to build scalable backend services. Required skills: Python, SQL, Git, and FastAPI. Experience with Linux, MySQL, and Docker is preferred.

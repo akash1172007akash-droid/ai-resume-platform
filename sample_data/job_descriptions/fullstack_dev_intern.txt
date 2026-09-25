@@ -1,0 +1,5 @@
+Title: Full Stack Developer Intern
+Company: NextGen Digital
+Level: Entry-level
+
+Seeking an enthusiastic Full Stack Developer Intern. The role involves designing interactive web frontends using React and JavaScript, combined with enterprise backend APIs built in Java and Spring Boot with MySQL databases.
