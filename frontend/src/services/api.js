@@ -7,25 +7,39 @@ import {
   SKILL_RECOMMENDATIONS_CATALOG,
 } from './mockData';
 
-// Initialize localStorage stores if empty
+// Initialize localStorage stores if empty or outdated
 const initStorage = () => {
-  if (!localStorage.getItem('mock_users')) {
+  if (!localStorage.getItem('mock_users') || JSON.parse(localStorage.getItem('mock_users') || '[]').length === 0) {
     localStorage.setItem('mock_users', JSON.stringify(INITIAL_MOCK_USERS));
   }
-  if (!localStorage.getItem('mock_jobs')) {
+  if (!localStorage.getItem('mock_jobs') || JSON.parse(localStorage.getItem('mock_jobs') || '[]').length === 0) {
     localStorage.setItem('mock_jobs', JSON.stringify(INITIAL_MOCK_JOBS));
   }
-  if (!localStorage.getItem('mock_resumes')) {
+  if (!localStorage.getItem('mock_resumes') || JSON.parse(localStorage.getItem('mock_resumes') || '[]').length === 0) {
     localStorage.setItem('mock_resumes', JSON.stringify(INITIAL_MOCK_RESUMES));
   }
-  if (!localStorage.getItem('mock_analyses')) {
+  if (!localStorage.getItem('mock_analyses') || JSON.parse(localStorage.getItem('mock_analyses') || '[]').length === 0) {
     localStorage.setItem('mock_analyses', JSON.stringify(INITIAL_MOCK_ANALYSES));
   }
 };
 initStorage();
 
-const getStore = (key) => JSON.parse(localStorage.getItem(key) || '[]');
+const getStore = (key) => {
+  initStorage();
+  try {
+    return JSON.parse(localStorage.getItem(key) || '[]');
+  } catch (e) {
+    return [];
+  }
+};
+
 const setStore = (key, data) => localStorage.setItem(key, JSON.stringify(data));
+
+// Detect if running on GitHub Pages static host without an active custom API URL
+const isGitHubPages = typeof window !== 'undefined' && (
+  window.location.hostname.includes('github.io') ||
+  window.location.protocol === 'file:'
+);
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -46,57 +60,59 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Fallback Mock Router for static GitHub Pages hosting
-const handleMockFallback = async (error) => {
-  const config = error.config;
-  if (!config) return Promise.reject(error);
-
-  const url = config.url.replace(/^.*\/api/, '');
-  const method = config.method.toUpperCase();
-  let data = {};
-  if (config.data) {
-    if (typeof config.data === 'string') {
-      try {
-        data = JSON.parse(config.data);
-      } catch (e) {
-        data = config.data;
-      }
-    } else {
-      data = config.data;
-    }
+// Client-Side Mock Dispatcher
+const executeMockHandler = async (urlPath, method, requestData) => {
+  // Normalize path removing base prefix
+  let cleanUrl = urlPath.replace(/^.*\/api/, '');
+  if (!cleanUrl.startsWith('/')) {
+    cleanUrl = '/' + cleanUrl;
   }
-
-  // Helper for mock user
+  const cleanMethod = method.toUpperCase();
   const currentUser = JSON.parse(localStorage.getItem('user') || 'null');
 
-  console.warn(`[Client Mock Engine] Servicing ${method} ${url} offline`);
+  console.info(`[Demo Engine] Processing ${cleanMethod} ${cleanUrl}`);
 
   // 1. Auth routes
-  if (url === '/auth/login' && method === 'POST') {
+  if (cleanUrl === '/auth/login' && cleanMethod === 'POST') {
     const users = getStore('mock_users');
+    const emailInput = (requestData.email || '').trim().toLowerCase();
+    const passInput = (requestData.password || '').trim();
+
     const u = users.find(
-      (user) => user.email.toLowerCase() === data.email?.toLowerCase() && user.password === data.password
+      (user) => user.email.toLowerCase() === emailInput && user.password === passInput
     );
+
     if (u) {
       return {
         data: {
           access_token: `mock_jwt_token_${u.id}_${Date.now()}`,
           token_type: 'bearer',
-          user: { id: u.id, name: u.name, email: u.email, role: u.role, created_at: u.created_at },
+          user: {
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            created_at: u.created_at,
+          },
         },
       };
     }
-    return Promise.reject({ response: { status: 401, data: { detail: 'Invalid demo credentials.' } } });
+    return Promise.reject({
+      response: {
+        status: 401,
+        data: { detail: 'Invalid credentials: Email or password incorrect.' },
+      },
+    });
   }
 
-  if (url === '/auth/register' && method === 'POST') {
+  if (cleanUrl === '/auth/register' && cleanMethod === 'POST') {
     const users = getStore('mock_users');
     const newUser = {
       id: Date.now(),
-      name: data.name,
-      email: data.email,
-      password: data.password,
-      role: data.role || 'CANDIDATE',
+      name: requestData.name,
+      email: requestData.email,
+      password: requestData.password,
+      role: requestData.role || 'CANDIDATE',
       created_at: new Date().toISOString(),
     };
     users.push(newUser);
@@ -105,41 +121,52 @@ const handleMockFallback = async (error) => {
       data: {
         access_token: `mock_jwt_token_${newUser.id}_${Date.now()}`,
         token_type: 'bearer',
-        user: { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role, created_at: newUser.created_at },
+        user: {
+          id: newUser.id,
+          name: newUser.name,
+          email: newUser.email,
+          role: newUser.role,
+          created_at: newUser.created_at,
+        },
       },
     };
   }
 
-  if (url === '/auth/me' && method === 'GET') {
+  if (cleanUrl === '/auth/me' && cleanMethod === 'GET') {
     if (currentUser) return { data: currentUser };
-    return Promise.reject({ response: { status: 401, data: { detail: 'Unauthorized' } } });
+    // Default fallback to candidate demo if authenticated
+    return { data: getStore('mock_users')[1] };
   }
 
   // 2. Dashboard routes
-  if (url === '/dashboard/candidate' && method === 'GET') {
-    const resumes = getStore('mock_resumes').filter((r) => !currentUser || r.user_id === currentUser.id);
+  if (cleanUrl === '/dashboard/candidate' && cleanMethod === 'GET') {
+    const allResumes = getStore('mock_resumes');
+    const resumes = currentUser
+      ? allResumes.filter((r) => r.user_id === currentUser.id)
+      : allResumes;
     const analyses = getStore('mock_analyses');
-    const latest = resumes[0] || null;
+    const latest = resumes[0] || allResumes[0] || null;
+
     return {
       data: {
-        total_resumes: resumes.length,
+        total_resumes: resumes.length || 1,
         latest_resume: latest
           ? {
               id: latest.id,
               filename: latest.filename,
               file_size: latest.file_size,
               uploaded_at: latest.uploaded_at,
-              skills: latest.skills.map((s) => s.skill_name),
+              skills: (latest.skills || []).map((s) => s.skill_name || s),
             }
           : null,
-        detected_skills_count: latest ? latest.skills.length : 0,
+        detected_skills_count: latest ? (latest.skills || []).length : 10,
         total_analyses: analyses.length,
         recent_analyses: analyses.slice(0, 10),
       },
     };
   }
 
-  if (url === '/dashboard/recruiter' && method === 'GET') {
+  if (cleanUrl === '/dashboard/recruiter' && cleanMethod === 'GET') {
     const jobs = getStore('mock_jobs');
     const resumes = getStore('mock_resumes');
     const analyses = getStore('mock_analyses');
@@ -177,40 +204,39 @@ const handleMockFallback = async (error) => {
   }
 
   // 3. Resumes routes
-  if (url === '/resumes' && method === 'GET') {
-    const resumes = getStore('mock_resumes');
-    return { data: resumes };
+  if (cleanUrl === '/resumes' && cleanMethod === 'GET') {
+    return { data: getStore('mock_resumes') };
   }
 
-  if (url.startsWith('/resumes/') && method === 'GET') {
-    const id = parseInt(url.split('/')[2]);
+  if (cleanUrl.startsWith('/resumes/') && cleanMethod === 'GET') {
+    const parts = cleanUrl.split('/');
+    const id = parseInt(parts[2]);
     const resumes = getStore('mock_resumes');
-    const found = resumes.find((r) => r.id === id);
-    if (found) return { data: found };
+    const found = resumes.find((r) => r.id === id) || resumes[0];
+    return { data: found };
   }
 
-  if (url === '/resumes/upload' && method === 'POST') {
+  if (cleanUrl === '/resumes/upload' && cleanMethod === 'POST') {
     const resumes = getStore('mock_resumes');
-    const filename = data instanceof FormData ? 'uploaded_resume.pdf' : 'resume.pdf';
     const newResume = {
       id: Date.now(),
       user_id: currentUser ? currentUser.id : 2,
-      candidate_name: currentUser ? currentUser.name : 'Candidate User',
+      candidate_name: currentUser ? currentUser.name : 'Akash Sharma',
       candidate_email: currentUser ? currentUser.email : 'candidate@example.com',
-      filename: filename,
-      file_size: 18450,
+      filename: 'uploaded_candidate_resume.pdf',
+      file_size: 19240,
       uploaded_at: new Date().toISOString(),
       skills_count: 8,
       extracted_text:
-        'Software Developer with experience in Python, SQL, React, FastAPI, Machine Learning, Scikit-learn, Git, and Docker.',
-      clean_text: 'software developer experience python sql react fastapi machine learning scikit-learn git docker',
+        'Software Engineer with experience in Python, SQL, FastAPI, Scikit-learn, Machine Learning, React, and Git.',
+      clean_text: 'software engineer experience python sql fastapi scikit-learn machine learning react git',
       skills: [
         { id: 1, skill_name: 'Python', category: 'Programming Languages' },
         { id: 2, skill_name: 'SQL', category: 'Databases' },
-        { id: 3, skill_name: 'React', category: 'Web Development' },
-        { id: 4, skill_name: 'FastAPI', category: 'Web Development' },
+        { id: 3, skill_name: 'FastAPI', category: 'Web Development' },
+        { id: 4, skill_name: 'Scikit-learn', category: 'AI & Machine Learning' },
         { id: 5, skill_name: 'Machine Learning', category: 'AI & Machine Learning' },
-        { id: 6, skill_name: 'Scikit-learn', category: 'AI & Machine Learning' },
+        { id: 6, skill_name: 'React', category: 'Web Development' },
         { id: 7, skill_name: 'Git', category: 'Tools & Platforms' },
         { id: 8, skill_name: 'Docker', category: 'Cloud & DevOps' },
       ],
@@ -220,8 +246,8 @@ const handleMockFallback = async (error) => {
     return { data: newResume };
   }
 
-  if (url.startsWith('/resumes/') && method === 'DELETE') {
-    const id = parseInt(url.split('/')[2]);
+  if (cleanUrl.startsWith('/resumes/') && cleanMethod === 'DELETE') {
+    const id = parseInt(cleanUrl.split('/')[2]);
     let resumes = getStore('mock_resumes');
     resumes = resumes.filter((r) => r.id !== id);
     setStore('mock_resumes', resumes);
@@ -229,27 +255,28 @@ const handleMockFallback = async (error) => {
   }
 
   // 4. Jobs routes
-  if (url === '/jobs' && method === 'GET') {
+  if (cleanUrl === '/jobs' && cleanMethod === 'GET') {
     return { data: getStore('mock_jobs') };
   }
 
-  if (url.startsWith('/jobs/') && method === 'GET') {
-    const id = parseInt(url.split('/')[2]);
-    const job = getStore('mock_jobs').find((j) => j.id === id);
-    if (job) return { data: job };
+  if (cleanUrl.startsWith('/jobs/') && cleanMethod === 'GET') {
+    const id = parseInt(cleanUrl.split('/')[2]);
+    const jobs = getStore('mock_jobs');
+    const job = jobs.find((j) => j.id === id) || jobs[0];
+    return { data: job };
   }
 
-  if (url === '/jobs' && method === 'POST') {
+  if (cleanUrl === '/jobs' && cleanMethod === 'POST') {
     const jobs = getStore('mock_jobs');
     const newJob = {
       id: Date.now(),
       recruiter_id: currentUser ? currentUser.id : 1,
-      title: data.title,
-      company: data.company,
-      description: data.description,
-      experience_level: data.experience_level || 'Entry-level',
-      required_skills: data.required_skills || [],
-      preferred_skills: data.preferred_skills || [],
+      title: requestData.title,
+      company: requestData.company,
+      description: requestData.description,
+      experience_level: requestData.experience_level || 'Entry-level',
+      required_skills: requestData.required_skills || ['Python', 'SQL', 'FastAPI'],
+      preferred_skills: requestData.preferred_skills || ['Docker'],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       analysis_count: 0,
@@ -259,8 +286,8 @@ const handleMockFallback = async (error) => {
     return { data: newJob };
   }
 
-  if (url.startsWith('/jobs/') && method === 'DELETE') {
-    const id = parseInt(url.split('/')[2]);
+  if (cleanUrl.startsWith('/jobs/') && cleanMethod === 'DELETE') {
+    const id = parseInt(cleanUrl.split('/')[2]);
     let jobs = getStore('mock_jobs');
     jobs = jobs.filter((j) => j.id !== id);
     setStore('mock_jobs', jobs);
@@ -268,33 +295,33 @@ const handleMockFallback = async (error) => {
   }
 
   // 5. Analysis routes
-  if (url === '/analysis' && method === 'POST') {
+  if (cleanUrl === '/analysis' && cleanMethod === 'POST') {
     const resumes = getStore('mock_resumes');
     const jobs = getStore('mock_jobs');
     const analyses = getStore('mock_analyses');
 
-    const resume = resumes.find((r) => r.id === parseInt(data.resume_id)) || resumes[0];
+    const resume = resumes.find((r) => r.id === parseInt(requestData.resume_id)) || resumes[0];
     let job = null;
 
-    if (data.job_id) {
-      job = jobs.find((j) => j.id === parseInt(data.job_id));
-    } else if (data.custom_job_description) {
+    if (requestData.job_id) {
+      job = jobs.find((j) => j.id === parseInt(requestData.job_id)) || jobs[0];
+    } else {
       job = {
         id: Date.now(),
-        title: data.custom_job_title || 'Custom Target Job',
-        company: data.custom_company || 'Custom Company',
-        description: data.custom_job_description,
-        required_skills: data.custom_required_skills || ['Python', 'SQL', 'FastAPI'],
+        title: requestData.custom_job_title || 'Target Job Role',
+        company: requestData.custom_company || 'Target Company',
+        description: requestData.custom_job_description || '',
+        required_skills: requestData.custom_required_skills || ['Python', 'SQL', 'FastAPI'],
       };
     }
 
-    const rSkills = (resume?.skills || []).map((s) => s.skill_name.toLowerCase());
-    const jSkills = (job?.required_skills || []).map((s) => s.trim());
+    const rSkills = (resume?.skills || []).map((s) => (s.skill_name || s).toLowerCase());
+    const jSkills = (job?.required_skills || ['Python', 'SQL']).map((s) => s.trim());
 
     const matched = jSkills.filter((js) => rSkills.includes(js.toLowerCase()));
     const missing = jSkills.filter((js) => !rSkills.includes(js.toLowerCase()));
     const additional = (resume?.skills || [])
-      .map((s) => s.skill_name)
+      .map((s) => s.skill_name || s)
       .filter((rs) => !jSkills.map((s) => s.toLowerCase()).includes(rs.toLowerCase()));
 
     const simScore = Math.min(
@@ -306,7 +333,7 @@ const handleMockFallback = async (error) => {
     const recs = missing.map((sk) => {
       const entry = SKILL_RECOMMENDATIONS_CATALOG[sk] || {
         title: `${sk} Fundamentals`,
-        description: `Learn core concepts, best practices, and hands-on projects for ${sk}.`,
+        description: `Learn foundational principles, syntax, and practical implementation for ${sk}.`,
         resource: 'https://docs.python.org/3/',
       };
       return {
@@ -320,13 +347,13 @@ const handleMockFallback = async (error) => {
     const newAnalysis = {
       id: Date.now(),
       resume_id: resume.id,
-      job_id: job ? job.id : 1,
+      job_id: job.id,
       candidate_name: resume.candidate_name,
       candidate_email: resume.candidate_email,
       resume_filename: resume.filename,
-      job_title: job ? job.title : 'Job Role',
-      company: job ? job.company : 'Company',
-      experience_level: job?.experience_level || 'Open Level',
+      job_title: job.title,
+      company: job.company,
+      experience_level: job.experience_level || 'Open Level',
       similarity_score: simScore,
       skill_match_percentage: matchPct,
       matched_skill_count: matched.length,
@@ -345,12 +372,12 @@ const handleMockFallback = async (error) => {
     return { data: newAnalysis };
   }
 
-  if (url === '/analysis/history' && method === 'GET') {
+  if (cleanUrl === '/analysis/history' && cleanMethod === 'GET') {
     return { data: getStore('mock_analyses') };
   }
 
-  if (url.startsWith('/analysis/job/') && method === 'GET') {
-    const jobId = parseInt(url.split('/')[3]);
+  if (cleanUrl.startsWith('/analysis/job/') && cleanMethod === 'GET') {
+    const jobId = parseInt(cleanUrl.split('/')[3]);
     const analyses = getStore('mock_analyses').filter((a) => a.job_id === jobId);
     const result = analyses.map((a) => ({
       analysis_id: a.id,
@@ -371,13 +398,13 @@ const handleMockFallback = async (error) => {
     return { data: result };
   }
 
-  if (url.startsWith('/analysis/batch/') && method === 'POST') {
+  if (cleanUrl.startsWith('/analysis/batch/') && cleanMethod === 'POST') {
     const analyses = getStore('mock_analyses');
     return { data: analyses.slice(0, 3) };
   }
 
-  if (url === '/analysis/compare' && method === 'POST') {
-    const ids = Array.isArray(data) ? data : [];
+  if (cleanUrl === '/analysis/compare' && cleanMethod === 'POST') {
+    const ids = Array.isArray(requestData) ? requestData : [];
     const all = getStore('mock_analyses');
     const comp = all
       .filter((a) => ids.includes(a.id))
@@ -398,29 +425,90 @@ const handleMockFallback = async (error) => {
     return { data: comp };
   }
 
-  if (url.startsWith('/analysis/') && method === 'GET') {
-    const id = parseInt(url.split('/')[2]);
-    const found = getStore('mock_analyses').find((a) => a.id === id);
-    if (found) return { data: found };
+  if (cleanUrl.startsWith('/analysis/') && cleanMethod === 'GET') {
+    const id = parseInt(cleanUrl.split('/')[2]);
+    const found = getStore('mock_analyses').find((a) => a.id === id) || getStore('mock_analyses')[0];
+    return { data: found };
   }
 
-  return Promise.reject(error);
+  return Promise.reject(new Error(`Unhandled route ${cleanMethod} ${cleanUrl}`));
 };
 
-// Response interceptor to catch network / 404 / 500 errors and transparently fallback to client mock
+// If on GitHub Pages without a configured external backend URL, dispatch directly to client demo engine
+if (isGitHubPages && !import.meta.env.VITE_API_URL) {
+  api.interceptors.request.use(async (config) => {
+    let reqData = {};
+    if (config.data) {
+      if (typeof config.data === 'string') {
+        try {
+          reqData = JSON.parse(config.data);
+        } catch (e) {
+          reqData = config.data;
+        }
+      } else {
+        reqData = config.data;
+      }
+    }
+
+    // Set custom adapter that returns mock data directly without network 405 error
+    config.adapter = async () => {
+      try {
+        const result = await executeMockHandler(config.url, config.method, reqData);
+        return {
+          data: result.data,
+          status: 200,
+          statusText: 'OK',
+          headers: {},
+          config,
+        };
+      } catch (err) {
+        if (err.response) {
+          return Promise.reject({
+            config,
+            response: {
+              data: err.response.data,
+              status: err.response.status,
+              statusText: 'Error',
+              headers: {},
+              config,
+            },
+          });
+        }
+        return Promise.reject(err);
+      }
+    };
+
+    return config;
+  });
+}
+
+// Fallback response interceptor for network/CORS/404/405/502 errors
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    // If backend is not reached (e.g. static GitHub Pages host) or 404 on API endpoint
-    if (!error.response || error.response.status === 404 || error.response.status === 502) {
+    const status = error.response ? error.response.status : 0;
+    // Catch 404, 405 (Method Not Allowed from static hosts), 502, or network failures
+    if (!error.response || [404, 405, 502, 503].includes(status)) {
       try {
-        return await handleMockFallback(error);
+        let reqData = {};
+        if (error.config?.data) {
+          if (typeof error.config.data === 'string') {
+            try {
+              reqData = JSON.parse(error.config.data);
+            } catch (e) {
+              reqData = error.config.data;
+            }
+          } else {
+            reqData = error.config.data;
+          }
+        }
+        return await executeMockHandler(error.config.url, error.config.method, reqData);
       } catch (mockErr) {
         return Promise.reject(mockErr);
       }
     }
 
-    if (error.response && error.response.status === 401) {
+    if (status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
     }
